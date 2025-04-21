@@ -67,18 +67,29 @@ app.post('/upload', upload.single('audio'), async (req, res) => {
       model: 'whisper-1',
       file: fs.createReadStream(convertedPath),
       response_format: 'text',
-      language: 'en',
+      language: 'en', // Ensure consistent language detection
       temperature: 0,
       prompt: 'Please transcribe the spoken words in the audio clearly and accurately.'
     });
 
     const transcriptText = transcription.trim();
-
     console.log('Transcription:', transcriptText);
 
-    if (!transcriptText || transcriptText.toLowerCase().includes("you") && transcriptText.length < 10) {
+    // Filter out known hallucination phrases
+    const hallucinationIndicators = [
+      'Transcription by ESO',
+      'Translation by',
+      'This is an audio recording of the sound',
+      'You'
+    ];
+
+    const isHallucination = hallucinationIndicators.some(phrase =>
+      transcriptText.toLowerCase().includes(phrase.toLowerCase())
+    );
+
+    if (!transcriptText || isHallucination || transcriptText.length < 10) {
       fs.unlinkSync(convertedPath);
-      return res.status(400).json({ error: 'Transcription failed or was empty. Try speaking clearly or recording again.' });
+      return res.status(400).json({ error: 'Transcription failed or seems incorrect. Try speaking clearly or recording again.' });
     }
 
     const dalleRes = await openai.images.generate({
@@ -99,6 +110,8 @@ app.post('/upload', upload.single('audio'), async (req, res) => {
   } catch (error) {
     console.error('Error:', error);
     if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
+    if (fs.existsSync(audioPath.replace(path.extname(audioPath), '.wav')))
+      fs.unlinkSync(audioPath.replace(path.extname(audioPath), '.wav'));
     res.status(500).json({ error: error.message });
   }
 });
