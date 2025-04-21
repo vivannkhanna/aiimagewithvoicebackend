@@ -30,15 +30,12 @@ const upload = multer({
 });
 
 app.post('/upload', upload.single('audio'), async (req, res) => {
-  let audioPath = req.file?.path;
-  if (!audioPath) {
-    return res.status(400).json({ error: 'No audio file uploaded.' });
-  }
+  let audioPath = req.file.path;
 
   try {
     let convertedPath = audioPath.replace(path.extname(audioPath), '.wav');
 
-    // Convert to WAV if necessary
+    // wav conversion
     if (path.extname(audioPath).toLowerCase() !== '.wav') {
       await new Promise((resolve, reject) => {
         ffmpeg(audioPath)
@@ -53,7 +50,7 @@ app.post('/upload', upload.single('audio'), async (req, res) => {
       convertedPath = audioPath;
     }
 
-    // Check audio duration
+    // audio duration check
     const duration = await new Promise((resolve, reject) => {
       ffmpeg.ffprobe(convertedPath, (err, metadata) => {
         if (err) return reject(err);
@@ -68,25 +65,26 @@ app.post('/upload', upload.single('audio'), async (req, res) => {
       return res.status(400).json({ error: 'Audio too short or silent. Please try again with a longer or clearer recording.' });
     }
 
-    // Transcribe using Whisper
+    // whisper transcription with a prompt to reduce hallucinations
     const transcription = await openai.audio.transcriptions.create({
       model: 'whisper-1',
       file: fs.createReadStream(convertedPath),
       response_format: 'text',
       language: 'en',
+      prompt: 'Please transcribe the following audio clearly.',
       temperature: 0
     });
 
-    const transcriptText = transcription.trim();
+    const transcriptText = transcription.trim(); // Ensure it's a string
 
     console.log('Transcription:', transcriptText);
 
-    if (!transcriptText || transcriptText.length === 0) {
+    if (!transcriptText) {
       fs.unlinkSync(convertedPath);
       return res.status(400).json({ error: 'Transcription failed or was empty. Try speaking clearly or recording again.' });
     }
 
-    // Generate image from transcript
+    // dalle image generation based on transcription
     const dalleRes = await openai.images.generate({
       prompt: transcriptText,
       n: 1,
@@ -105,7 +103,7 @@ app.post('/upload', upload.single('audio'), async (req, res) => {
   } catch (error) {
     console.error('Error:', error);
     if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
-    return res.status(500).json({ error: error.message || 'Unexpected server error occurred.' });
+    res.status(500).json({ error: error.message });
   }
 });
 
