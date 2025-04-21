@@ -35,7 +35,6 @@ app.post('/upload', upload.single('audio'), async (req, res) => {
   try {
     let convertedPath = audioPath.replace(path.extname(audioPath), '.wav');
 
-    // wav conversion
     if (path.extname(audioPath).toLowerCase() !== '.wav') {
       await new Promise((resolve, reject) => {
         ffmpeg(audioPath)
@@ -50,7 +49,6 @@ app.post('/upload', upload.single('audio'), async (req, res) => {
       convertedPath = audioPath;
     }
 
-    // audio duration check
     const duration = await new Promise((resolve, reject) => {
       ffmpeg.ffprobe(convertedPath, (err, metadata) => {
         if (err) return reject(err);
@@ -65,26 +63,24 @@ app.post('/upload', upload.single('audio'), async (req, res) => {
       return res.status(400).json({ error: 'Audio too short or silent. Please try again with a longer or clearer recording.' });
     }
 
-    // whisper transcription with a prompt to reduce hallucinations
     const transcription = await openai.audio.transcriptions.create({
       model: 'whisper-1',
       file: fs.createReadStream(convertedPath),
       response_format: 'text',
       language: 'en',
-      prompt: 'Please transcribe the following audio clearly.',
-      temperature: 0
+      temperature: 0,
+      prompt: 'Please transcribe the spoken words in the audio clearly and accurately.'
     });
 
-    const transcriptText = transcription.trim(); // Ensure it's a string
+    const transcriptText = transcription.trim();
 
     console.log('Transcription:', transcriptText);
 
-    if (!transcriptText) {
+    if (!transcriptText || transcriptText.toLowerCase().includes("you") && transcriptText.length < 10) {
       fs.unlinkSync(convertedPath);
       return res.status(400).json({ error: 'Transcription failed or was empty. Try speaking clearly or recording again.' });
     }
 
-    // dalle image generation based on transcription
     const dalleRes = await openai.images.generate({
       prompt: transcriptText,
       n: 1,
