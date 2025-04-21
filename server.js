@@ -33,34 +33,35 @@ app.post('/upload', upload.single('audio'), async (req, res) => {
   let audioPath = req.file.path;
 
   try {
-    let convertedPath = audioPath.replace(path.extname(audioPath), '.ogg');
+    // Convert uploaded audio to WAV for better Whisper accuracy
+    let convertedPath = audioPath.replace(path.extname(audioPath), '.wav');
 
     if (path.extname(audioPath).toLowerCase() === '.mp3') {
       await new Promise((resolve, reject) => {
         ffmpeg(audioPath)
-          .audioCodec('libopus')
-          .toFormat('ogg')
+          .audioCodec('pcm_s16le') // 16-bit PCM (uncompressed)
+          .format('wav')
           .save(convertedPath)
           .on('end', resolve)
           .on('error', reject);
       });
-      fs.unlinkSync(audioPath);
+      fs.unlinkSync(audioPath); // Remove original MP3
     } else {
       convertedPath = audioPath;
     }
 
-    // Get plain text transcription
+    // Get plain text transcription from Whisper
     const transcription = await openai.audio.transcriptions.create({
       model: 'whisper-1',
       file: fs.createReadStream(convertedPath),
       response_format: 'text'
     });
 
-    const transcriptText = transcription; // it's already plain text
+    const transcriptText = transcription; // response is plain text
 
     console.log('Transcription:', transcriptText);
 
-    // Generate image using the transcription text
+    // Use transcription as prompt for DALL·E
     const dalleRes = await openai.images.generate({
       prompt: transcriptText,
       n: 1,
