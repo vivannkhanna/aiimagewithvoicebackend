@@ -25,37 +25,31 @@ const upload = multer({
 // Upload route
 app.post('/upload', upload.single('audio'), async (req, res) => {
   const audioPath = req.file.path;
-  const fileExtension = path.extname(req.file.originalname).toLowerCase();
 
   try {
-    // Ensure we are passing the correct MIME type based on file extension
-    let fileStream = fs.createReadStream(audioPath);
-    if (fileExtension === '.mp3') {
-      fileStream.name = 'file.mp3';  // Set name for .mp3
-    } else if (fileExtension === '.ogg') {
-      fileStream.name = 'file.ogg';  // Set name for .ogg
-    } else {
-      fileStream.name = 'file.webm';  // Default to .webm if no other option
-    }
-
+    // Transcribe audio to text using Whisper model
     const transcription = await openai.audio.transcriptions.create({
       model: 'whisper-1',
-      file: fileStream, // Provide the file stream
+      file: fs.createReadStream(audioPath),
       response_format: 'text'
     });
 
+    console.log('Transcription:', transcription.text);  // Log transcription to check
+
+    // Generate image using the transcription text as the prompt
     const dalleRes = await openai.images.generate({
-      prompt: transcription.text,
+      prompt: transcription.text,  // Pass transcription text as prompt
       n: 1,
       size: "1024x1024"
     });
 
-    const imageUrl = dalleRes.data[0].url;
-    fs.unlinkSync(audioPath); // cleanup
+    const imageUrl = dalleRes.data[0].url;  // Extract the image URL from the response
+    fs.unlinkSync(audioPath);  // Cleanup the uploaded audio file
 
+    // Send back the transcription and image URL as a response
     res.json({
-      transcription: transcription.text,
-      imageUrl
+      transcription: transcription.text,  // Send the transcription as part of the response
+      imageUrl: imageUrl  // Send the generated image URL
     });
   } catch (error) {
     console.error('Error:', error);
