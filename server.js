@@ -33,35 +33,58 @@ app.post('/upload', upload.single('audio'), async (req, res) => {
   let audioPath = req.file.path;
 
   try {
-    // Convert uploaded audio to WAV for better Whisper accuracy
     let convertedPath = audioPath.replace(path.extname(audioPath), '.wav');
 
-    if (path.extname(audioPath).toLowerCase() === '.mp3') {
+    // wav stuff
+    if (path.extname(audioPath).toLowerCase() !== '.wav') {
       await new Promise((resolve, reject) => {
         ffmpeg(audioPath)
-          .audioCodec('pcm_s16le') // 16-bit PCM (uncompressed)
+          .audioCodec('pcm_s16le')
           .format('wav')
           .save(convertedPath)
           .on('end', resolve)
           .on('error', reject);
       });
-      fs.unlinkSync(audioPath); // Remove original MP3
+      fs.unlinkSync(audioPath);
     } else {
       convertedPath = audioPath;
     }
 
-    // Get plain text transcription from Whisper
+    // audio duration guidelines
+    const duration = await new Promise((resolve, reject) => {
+      ffmpeg.ffprobe(convertedPath, (err, metadata) => {
+        if (err) return reject(err);
+        resolve(metadata.format.duration);
+      });
+    });
+
+    console.log(`Audio duration: ${duration}s`);
+
+    if (duration < 1) {
+      fs.unlinkSync(convertedPath);
+      return res.status(400).json({ error: 'Audio too short or silent. Please try again with a longer or clearer recording.' });
+    }
+
+    // whisper
     const transcription = await openai.audio.transcriptions.create({
       model: 'whisper-1',
       file: fs.createReadStream(convertedPath),
-      response_format: 'text'
+      response_format: 'text',
+      language: 'en',
+      temperature: 0
     });
 
-    const transcriptText = transcription; // response is plain text
+    const transcriptText = transcription.trim(); // Ensure it's a string
 
     console.log('Transcription:', transcriptText);
 
-    // Use transcription as prompt for DALL·E
+    // feedback
+    if (!transcriptText) {
+      fs.unlinkSync(convertedPath);
+      return res.status(400).json({ error: 'Transcription failed or was empty. Try speaking clearly or recording again.' });
+    }
+
+    // dalle stuff
     const dalleRes = await openai.images.generate({
       prompt: transcriptText,
       n: 1,
@@ -69,14 +92,17 @@ app.post('/upload', upload.single('audio'), async (req, res) => {
     });
 
     const imageUrl = dalleRes.data[0].url;
+
     fs.unlinkSync(convertedPath);
 
     res.json({
       transcription: transcriptText,
       imageUrl: imageUrl
     });
+
   } catch (error) {
     console.error('Error:', error);
+    if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
     res.status(500).json({ error: error.message });
   }
 });
