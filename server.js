@@ -34,11 +34,11 @@ const upload = multer({
 
 // Upload route for MP3 and other formats
 app.post('/upload', upload.single('audio'), async (req, res) => {
-  const audioPath = req.file.path;
+  let audioPath = req.file.path;  // Let used here since we may modify it
 
   try {
     // Check if the uploaded file is MP3, and if so, convert it to a compatible format for Whisper (e.g., OGG)
-    const convertedPath = audioPath.replace(path.extname(audioPath), '.ogg');
+    let convertedPath = audioPath.replace(path.extname(audioPath), '.ogg'); // Using 'let' for reassignment
     
     if (path.extname(audioPath).toLowerCase() === '.mp3') {
       // Convert MP3 to OGG using ffmpeg
