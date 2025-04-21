@@ -4,80 +4,75 @@ const path = require('path');
 const fs = require('fs');
 const cors = require('cors');
 const { OpenAI } = require('openai');
-const ffmpeg = require('fluent-ffmpeg'); // For converting MP3 to compatible format
+const ffmpeg = require('fluent-ffmpeg');
 require('dotenv').config();
 
 const app = express();
 const port = process.env.PORT || 8080;
 
-// Middleware
 app.use(cors());
 app.use(express.static(path.join(__dirname, 'www')));
 
-// OpenAI client
 const openai = new OpenAI({ apiKey: process.env.API_KEY });
 
-// Multer config for accepting audio files including mp3
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, 'uploads/');
   },
   filename: function (req, file, cb) {
-    cb(null, Date.now() + path.extname(file.originalname)); // Save with original extension
+    cb(null, Date.now() + path.extname(file.originalname));
   }
 });
 
 const upload = multer({
   storage: storage,
-  limits: { fileSize: 25 * 1024 * 1024 }, // Max file size of 25MB
+  limits: { fileSize: 25 * 1024 * 1024 },
 });
 
-// Upload route for MP3 and other formats
 app.post('/upload', upload.single('audio'), async (req, res) => {
-  let audioPath = req.file.path;  // Let used here since we may modify it
+  let audioPath = req.file.path;
 
   try {
-    // Check if the uploaded file is MP3, and if so, convert it to a compatible format for Whisper (e.g., OGG)
-    let convertedPath = audioPath.replace(path.extname(audioPath), '.ogg'); // Using 'let' for reassignment
-    
+    let convertedPath = audioPath.replace(path.extname(audioPath), '.ogg');
+
     if (path.extname(audioPath).toLowerCase() === '.mp3') {
-      // Convert MP3 to OGG using ffmpeg
       await new Promise((resolve, reject) => {
         ffmpeg(audioPath)
-          .audioCodec('libopus') // For compatibility with Whisper
+          .audioCodec('libopus')
           .toFormat('ogg')
           .save(convertedPath)
           .on('end', resolve)
           .on('error', reject);
       });
-      fs.unlinkSync(audioPath); // Remove the original MP3 file
+      fs.unlinkSync(audioPath);
     } else {
-      convertedPath = audioPath; // No conversion needed for other formats
+      convertedPath = audioPath;
     }
 
-    // Transcribe audio to text using Whisper model
+    // Get plain text transcription
     const transcription = await openai.audio.transcriptions.create({
       model: 'whisper-1',
       file: fs.createReadStream(convertedPath),
       response_format: 'text'
     });
 
-    console.log('Transcription:', transcription.text);  // Log transcription to check
+    const transcriptText = transcription; // it's already plain text
 
-    // Generate image using the transcription text as the prompt
+    console.log('Transcription:', transcriptText);
+
+    // Generate image using the transcription text
     const dalleRes = await openai.images.generate({
-      prompt: transcription.text,  // Pass transcription text as prompt
+      prompt: transcriptText,
       n: 1,
       size: "1024x1024"
     });
 
-    const imageUrl = dalleRes.data[0].url;  // Extract the image URL from the response
-    fs.unlinkSync(convertedPath);  // Cleanup the converted audio file
+    const imageUrl = dalleRes.data[0].url;
+    fs.unlinkSync(convertedPath);
 
-    // Send back the transcription and image URL as a response
     res.json({
-      transcription: transcription.text,  // Send the transcription as part of the response
-      imageUrl: imageUrl  // Send the generated image URL
+      transcription: transcriptText,
+      imageUrl: imageUrl
     });
   } catch (error) {
     console.error('Error:', error);
@@ -85,7 +80,6 @@ app.post('/upload', upload.single('audio'), async (req, res) => {
   }
 });
 
-// Fallback route (for SPA support on Render)
 app.get('*', (req, res) => {
   const indexPath = path.join(__dirname, 'www/index.html');
   if (fs.existsSync(indexPath)) {
