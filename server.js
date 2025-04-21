@@ -30,12 +30,15 @@ const upload = multer({
 });
 
 app.post('/upload', upload.single('audio'), async (req, res) => {
-  let audioPath = req.file.path;
+  let audioPath = req.file?.path;
+  if (!audioPath) {
+    return res.status(400).json({ error: 'No audio file uploaded.' });
+  }
 
   try {
     let convertedPath = audioPath.replace(path.extname(audioPath), '.wav');
 
-    // wav stuff
+    // Convert to WAV if necessary
     if (path.extname(audioPath).toLowerCase() !== '.wav') {
       await new Promise((resolve, reject) => {
         ffmpeg(audioPath)
@@ -50,7 +53,7 @@ app.post('/upload', upload.single('audio'), async (req, res) => {
       convertedPath = audioPath;
     }
 
-    // audio duration guidelines
+    // Check audio duration
     const duration = await new Promise((resolve, reject) => {
       ffmpeg.ffprobe(convertedPath, (err, metadata) => {
         if (err) return reject(err);
@@ -65,7 +68,7 @@ app.post('/upload', upload.single('audio'), async (req, res) => {
       return res.status(400).json({ error: 'Audio too short or silent. Please try again with a longer or clearer recording.' });
     }
 
-    // whisper
+    // Transcribe using Whisper
     const transcription = await openai.audio.transcriptions.create({
       model: 'whisper-1',
       file: fs.createReadStream(convertedPath),
@@ -74,17 +77,16 @@ app.post('/upload', upload.single('audio'), async (req, res) => {
       temperature: 0
     });
 
-    const transcriptText = transcription.trim(); // Ensure it's a string
+    const transcriptText = transcription.trim();
 
     console.log('Transcription:', transcriptText);
 
-    // feedback
-    if (!transcriptText) {
+    if (!transcriptText || transcriptText.length === 0) {
       fs.unlinkSync(convertedPath);
       return res.status(400).json({ error: 'Transcription failed or was empty. Try speaking clearly or recording again.' });
     }
 
-    // dalle stuff
+    // Generate image from transcript
     const dalleRes = await openai.images.generate({
       prompt: transcriptText,
       n: 1,
@@ -103,7 +105,7 @@ app.post('/upload', upload.single('audio'), async (req, res) => {
   } catch (error) {
     console.error('Error:', error);
     if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
-    res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: error.message || 'Unexpected server error occurred.' });
   }
 });
 
